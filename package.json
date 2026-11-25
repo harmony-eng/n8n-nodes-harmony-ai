@@ -1,0 +1,53 @@
+{
+  "name": "n8n-nodes-harmony-ai",
+  "version": "0.1.0",
+  "description": "n8n nodes for Harmony AI voice agents: send contacts to Harmony workflows, look up contacts, calls and transcripts, and trigger flows when calls start, end, or have a recording.",
+  "keywords": [
+    "harmony",
+    "n8n-community-node-package",
+    "voice agent"
+  ],
+  "homepage": "https://docs.harmony.ai/guides/deploy/integrations/n8n/overview/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/harmony-eng/n8n-nodes-harmony-ai.git"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Harmony AI",
+    "email": "support@harmony.ai"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist/credentials",
+    "dist/nodes",
+    "dist/shared"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && for icon in nodes/*/*.svg credentials/*.svg; do cp \"$icon\" \"dist/$icon\"; done",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "rm -rf dist/test-build && tsc -p tsconfig.json --outDir dist/test-build && node --test \"dist/test-build/**/*.test.js\"",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "n8n-workflow": "2.46.5",
+    "typescript": "^7.0.2"
+  },
+  "peerDependencies": {
+    "n8n-workflow": "*"
+  },
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "strict": true,
+    "credentials": [
+      "dist/credentials/HarmonyAiApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/HarmonyAi/HarmonyAi.node.js",
+      "dist/nodes/HarmonyAiTrigger/HarmonyAiTrigger.node.js"
+    ]
+  }
+}

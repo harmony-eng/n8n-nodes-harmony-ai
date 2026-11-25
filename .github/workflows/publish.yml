@@ -1,0 +1,45 @@
+name: Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Pack and check the package without publishing it"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - run: npm test
+
+      - run: npm run build
+
+      - name: Refuse a version already on npm
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if npm view "n8n-nodes-harmony-ai@${version}" version >/dev/null 2>&1; then
+            echo "n8n-nodes-harmony-ai@${version} is already published. Bump version in package.json and HARMONY_PACKAGE_VERSION in shared/harmony-api.constants.ts."
+            exit 1
+          fi
+
+      - run: npm publish --provenance --access public ${{ inputs.dry_run && '--dry-run' || '' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
