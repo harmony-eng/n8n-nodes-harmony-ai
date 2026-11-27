@@ -3,6 +3,7 @@ import type {
   IExecuteFunctions,
   IHookFunctions,
   IHttpRequestOptions,
+  ILoadOptionsFunctions,
   INode,
   IWebhookFunctions,
 } from "n8n-workflow";
@@ -105,6 +106,15 @@ export class N8nContextDriver {
     };
 
     return context as IExecuteFunctions;
+  }
+
+  loadOptions(): ILoadOptionsFunctions {
+    const context: Partial<ILoadOptionsFunctions> = {
+      ...this.#base(),
+      helpers: this.#helpers() as ILoadOptionsFunctions["helpers"],
+    };
+
+    return context as ILoadOptionsFunctions;
   }
 
   hook(): IHookFunctions {

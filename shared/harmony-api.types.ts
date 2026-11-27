@@ -11,6 +11,8 @@ import type {
   BulkUpsertContactsResponse,
   CreateWebhookEndpointData,
   CreateWebhookEndpointResponse,
+  GetCallDetailsResponse,
+  GetCallTranscriptResponse,
   ListContactCallsByExternalIdResponse,
   ListWorkflowsResponse,
   UpdateContactByExternalIdData,
@@ -46,7 +48,15 @@ export type CreatedWebhookEndpoint = CreateWebhookEndpointResponse;
 
 export type WorkflowPage = ListWorkflowsResponse;
 
+export type AgentWorkflow = WorkflowPage["data"][number] & { parentRefId: string };
+
+export type AgentWorkflowIds = Map<string, Promise<string>>;
+
 export type ContactCallsPage = ListContactCallsByExternalIdResponse;
+
+export type CallDetails = GetCallDetailsResponse;
+
+export type CallTranscript = GetCallTranscriptResponse;
 
 export interface WebhookHeaders {
   webhookId: string | undefined;
@@ -78,7 +88,7 @@ export interface EndpointStaticData {
 export interface CallWebhook extends IDataObject {
   event: string;
   timestamp: string;
-  details: IDataObject & { callId?: string };
+  details: IDataObject & { callId?: string; isLastCall?: boolean };
 }
 
 export interface RecordingLink {

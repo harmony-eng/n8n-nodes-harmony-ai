@@ -19,24 +19,27 @@ import {
 } from "../../shared/contact-fields.util.ts";
 import { HARMONY_CREDENTIAL_NAME } from "../../shared/harmony-api.constants.ts";
 import type {
+  AgentWorkflowIds,
   BulkUpsertContactsBody,
   BulkUpsertContactsResult,
+  CallDetails,
+  CallTranscript,
   ContactCallsPage,
   UpsertContactBody,
 } from "../../shared/harmony-api.types.ts";
 import {
   failureJson,
+  findAgentWorkflowId,
   harmonyApiRequest,
-  listAgentWorkflowOptions,
+  listAgentOptions,
 } from "../../shared/harmony-api.util.ts";
 
-const ADD_TO_WORKFLOW = "addToWorkflow";
+const ADD_TO_AGENT = "addToAgent";
 const UPSERT = "upsert";
 const UPDATE = "updateByExternalId";
 const GET = "get";
 const GET_BY_EXTERNAL_ID = "getByExternalId";
 const GET_CALLS = "getCalls";
-const GET_TRANSCRIPT = "getTranscript";
 const CALLS_PAGE_LIMIT = 100;
 
 function externalIdPath({
@@ -88,40 +91,57 @@ async function listContactCalls({
   return calls;
 }
 
-async function runCallOperation({
+async function getCall({
   context,
-  operation,
   itemIndex,
 }: {
   context: IExecuteFunctions;
-  operation: string;
   itemIndex: number;
 }): Promise<IDataObject> {
   const callId = encodeURIComponent(context.getNodeParameter("callId", itemIndex) as string);
+  const path = `/api/v1/calls/${callId}`;
 
-  const path =
-    operation === GET_TRANSCRIPT ? `/api/v1/calls/${callId}/transcript` : `/api/v1/calls/${callId}`;
+  const includeTranscript = context.getNodeParameter("includeTranscript", itemIndex, false);
+  if (!includeTranscript) {
+    return await harmonyApiRequest<IDataObject>({
+      context,
+      itemIndex,
+      request: { method: "GET", path },
+    });
+  }
 
-  return await harmonyApiRequest<IDataObject>({
-    context,
-    itemIndex,
-    request: { method: "GET", path },
-  });
+  const [call, transcript] = await Promise.all([
+    harmonyApiRequest<CallDetails>({ context, itemIndex, request: { method: "GET", path } }),
+    harmonyApiRequest<CallTranscript>({
+      context,
+      itemIndex,
+      request: { method: "GET", path: `${path}/transcript` },
+    }),
+  ]);
+
+  return { ...call, transcript: transcript.utterances };
 }
 
-async function addToWorkflow({
+async function addToAgent({
   context,
   itemIndex,
   contact,
+  agentWorkflowIds,
 }: {
   context: IExecuteFunctions;
   itemIndex: number;
   contact: UpsertContactBody;
+  agentWorkflowIds: AgentWorkflowIds;
 }): Promise<IDataObject> {
-  const workflowId = context.getNodeParameter("workflowId", itemIndex) as string;
+  const agentId = context.getNodeParameter("agentId", itemIndex) as string;
+
+  const workflowId =
+    agentWorkflowIds.get(agentId) ?? findAgentWorkflowId({ context, itemIndex, agentId });
+
+  agentWorkflowIds.set(agentId, workflowId);
 
   const body: BulkUpsertContactsBody = {
-    assignmentOptions: { workflowId },
+    assignmentOptions: { workflowId: await workflowId },
     contacts: [contact],
   };
 
@@ -144,7 +164,7 @@ async function addToWorkflow({
 
   return {
     accepted: true,
-    workflowId,
+    agentId,
     sourceKind: contact.sourceKind,
     externalId: contact.externalId,
   };
@@ -154,10 +174,12 @@ async function runContactOperation({
   context,
   operation,
   itemIndex,
+  agentWorkflowIds,
 }: {
   context: IExecuteFunctions;
   operation: string;
   itemIndex: number;
+  agentWorkflowIds: AgentWorkflowIds;
 }): Promise<IDataObject | IDataObject[]> {
   if (operation === GET) {
     const contactId = context.getNodeParameter("contactId", itemIndex) as string;
@@ -207,7 +229,7 @@ async function runContactOperation({
     });
   }
 
-  return await addToWorkflow({ context, itemIndex, contact });
+  return await addToAgent({ context, itemIndex, contact, agentWorkflowIds });
 }
 
 export class HarmonyAi implements INodeType {
@@ -245,11 +267,11 @@ export class HarmonyAi implements INodeType {
         displayOptions: { show: { resource: ["contact"] } },
         options: [
           {
-            name: "Add to Workflow",
-            value: ADD_TO_WORKFLOW,
-            action: "Add a contact to a workflow",
+            name: "Add to Agent",
+            value: ADD_TO_AGENT,
+            action: "Add a contact to an agent",
             description:
-              "Create or update a contact and enroll it in a workflow. Harmony calls it on the workflow's schedule.",
+              "Create or update a contact and send it to a voice agent. Harmony calls it on the agent's schedule.",
           },
           {
             name: "Create or Update",
@@ -274,7 +296,7 @@ export class HarmonyAi implements INodeType {
             action: "Update a contact by external ID",
           },
         ],
-        default: ADD_TO_WORKFLOW,
+        default: ADD_TO_AGENT,
       },
       {
         displayName: "Operation",
@@ -282,27 +304,20 @@ export class HarmonyAi implements INodeType {
         type: "options",
         noDataExpression: true,
         displayOptions: { show: { resource: ["call"] } },
-        options: [
-          { name: "Get", value: GET, action: "Get a call" },
-          {
-            name: "Get Transcript",
-            value: GET_TRANSCRIPT,
-            action: "Get a call transcript",
-          },
-        ],
+        options: [{ name: "Get", value: GET, action: "Get a call" }],
         default: GET,
       },
       {
-        displayName: "Workflow Name or ID",
-        name: "workflowId",
+        displayName: "Voice Agent Name or ID",
+        name: "agentId",
         type: "options",
-        typeOptions: { loadOptionsMethod: "getWorkflows" },
+        typeOptions: { loadOptionsMethod: "getVoiceAgents" },
         required: true,
         default: "",
         description:
-          'The workflow to enroll the contact in. A contact that already ran it is skipped. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+          'The agent that calls the contact. A contact this agent already handled is skipped. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
         displayOptions: {
-          show: { resource: ["contact"], operation: [ADD_TO_WORKFLOW] },
+          show: { resource: ["contact"], operation: [ADD_TO_AGENT] },
         },
       },
       {
@@ -315,7 +330,7 @@ export class HarmonyAi implements INodeType {
         displayOptions: { show: { resource: ["contact"], operation: [GET] } },
       },
       sourceKindProperty({
-        operations: [ADD_TO_WORKFLOW, UPSERT, UPDATE, GET_BY_EXTERNAL_ID, GET_CALLS],
+        operations: [ADD_TO_AGENT, UPSERT, UPDATE, GET_BY_EXTERNAL_ID, GET_CALLS],
       }),
       {
         displayName: "External ID",
@@ -325,7 +340,7 @@ export class HarmonyAi implements INodeType {
         description:
           "The contact's ID in the source system. When empty, a new contact gets its Harmony ID as its external ID.",
         displayOptions: {
-          show: { resource: ["contact"], operation: [ADD_TO_WORKFLOW, UPSERT] },
+          show: { resource: ["contact"], operation: [ADD_TO_AGENT, UPSERT] },
         },
       },
       {
@@ -340,7 +355,7 @@ export class HarmonyAi implements INodeType {
         },
       },
       contactFieldsProperty({
-        operations: [ADD_TO_WORKFLOW, UPSERT],
+        operations: [ADD_TO_AGENT, UPSERT],
         name: "contactFields",
         displayName: "Contact Fields",
       }),
@@ -349,7 +364,7 @@ export class HarmonyAi implements INodeType {
         name: "updateFields",
         displayName: "Update Fields",
       }),
-      customFieldsProperty({ operations: [ADD_TO_WORKFLOW, UPSERT, UPDATE] }),
+      customFieldsProperty({ operations: [ADD_TO_AGENT, UPSERT, UPDATE] }),
       {
         displayName: "Return All",
         name: "returnAll",
@@ -384,16 +399,21 @@ export class HarmonyAi implements INodeType {
         description: "The Harmony call ID, such as callId from the Harmony AI Trigger",
         displayOptions: { show: { resource: ["call"] } },
       },
+      {
+        displayName: "Include Transcript",
+        name: "includeTranscript",
+        type: "boolean",
+        default: false,
+        description: "Whether to add the call's utterances to the output as transcript",
+        displayOptions: { show: { resource: ["call"], operation: [GET] } },
+      },
     ],
   };
 
   methods = {
     loadOptions: {
-      async getWorkflows(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-        return await listAgentWorkflowOptions({
-          context: this,
-          valueField: "id",
-        });
+      async getVoiceAgents(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+        return await listAgentOptions({ context: this });
       },
     },
   };
@@ -401,6 +421,7 @@ export class HarmonyAi implements INodeType {
   async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
     const items = this.getInputData();
     const returnData: INodeExecutionData[] = [];
+    const agentWorkflowIds: AgentWorkflowIds = new Map();
 
     for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
       const resource = this.getNodeParameter("resource", itemIndex);
@@ -408,8 +429,8 @@ export class HarmonyAi implements INodeType {
 
       const run =
         resource === "call"
-          ? runCallOperation({ context: this, operation, itemIndex })
-          : runContactOperation({ context: this, operation, itemIndex });
+          ? getCall({ context: this, itemIndex })
+          : runContactOperation({ context: this, operation, itemIndex, agentWorkflowIds });
 
       const result = this.continueOnFail()
         ? await run.catch((error: unknown) => failureJson({ error }))

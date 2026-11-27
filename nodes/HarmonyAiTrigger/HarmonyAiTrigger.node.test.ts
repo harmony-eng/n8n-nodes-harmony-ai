@@ -77,6 +77,51 @@ describe("HarmonyAiTrigger", () => {
     );
   });
 
+  it("subscribes Contact Calls Finished to Call Ended", async () => {
+    // Arrange
+    const driver = new N8nContextDriver({
+      parameters: { event: "contact_calls_finished", agentId: "" },
+      respond: () => ({ endpoint: { id: "endpoint-1" }, secret }),
+    });
+
+    // Act
+    await trigger.webhookMethods.default.create.call(driver.hook());
+
+    // Assert
+    assert.equal(
+      (driver.request({ index: 0 }).options.body as { eventType: string }).eventType,
+      "call_ended",
+    );
+  });
+
+  it("starts Contact Calls Finished only for a contact's last call", async () => {
+    // Arrange
+    const driver = subscribedDriver({ parameters: { event: "contact_calls_finished" } });
+
+    const notification = ({ isLastCall }: { isLastCall: boolean }) =>
+      JSON.stringify({
+        event: "call_ended",
+        timestamp: "2026-10-10T14:06:41.000Z",
+        details: { callId: "call-1", isLastCall },
+      });
+
+    const moreCalls = notification({ isLastCall: false });
+    const lastCall = notification({ isLastCall: true });
+
+    // Act
+    const skipped = await trigger.webhook.call(
+      driver.webhook({ headers: signedHeaders({ body: moreCalls }), rawBody: moreCalls }),
+    );
+
+    const started = await trigger.webhook.call(
+      driver.webhook({ headers: signedHeaders({ body: lastCall }), rawBody: lastCall }),
+    );
+
+    // Assert
+    assert.equal(skipped.workflowData, undefined);
+    assert.equal(started.workflowData?.[0]?.[0]?.json.isLastCall, true);
+  });
+
   it("deletes the endpoint and forgets it when the flow is turned off", async () => {
     // Arrange
     const driver = subscribedDriver();

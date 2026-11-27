@@ -3,7 +3,7 @@
 n8n community nodes for [Harmony AI](https://harmony.ai) voice agents.
 
 - **Harmony AI Trigger** starts a flow when a call starts, ends, or has a recording ready.
-- **Harmony AI** adds contacts to a voice agent's workflow, creates and updates contacts, and looks up contacts, their calls, and call transcripts. It can also run as an AI Agent tool.
+- **Harmony AI** adds contacts to a voice agent, creates and updates contacts, and looks up contacts, their calls, and call transcripts. It can also run as an AI Agent tool.
 
 ## Install
 

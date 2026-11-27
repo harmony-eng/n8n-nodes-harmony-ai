@@ -21,10 +21,15 @@ import type {
   CreateWebhookEndpointBody,
   WebhookEventType,
 } from "../../shared/harmony-api.types.ts";
-import { harmonyApiRequest, listAgentWorkflowOptions } from "../../shared/harmony-api.util.ts";
+import { harmonyApiRequest, listAgentOptions } from "../../shared/harmony-api.util.ts";
 import { isValidWebhookSignature } from "../../shared/webhook-signature.util.ts";
 
 const DESCRIPTION_MAX_LENGTH = 512;
+const CONTACT_CALLS_FINISHED = "contact_calls_finished";
+
+function webhookEventType({ event }: { event: string }): WebhookEventType {
+  return event === CONTACT_CALLS_FINISHED ? "call_ended" : (event as WebhookEventType);
+}
 
 function headerValue({
   headers,
@@ -116,6 +121,11 @@ export class HarmonyAiTrigger implements INodeType {
             value: "call_started",
             description: "A call attempt began, before it is answered",
           },
+          {
+            name: "Contact Calls Finished",
+            value: CONTACT_CALLS_FINISHED,
+            description: "A call ended and Harmony has no further call scheduled for the contact",
+          },
         ],
         default: "call_ended",
       },
@@ -142,10 +152,7 @@ export class HarmonyAiTrigger implements INodeType {
   methods = {
     loadOptions: {
       async getVoiceAgents(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-        const agents = await listAgentWorkflowOptions({
-          context: this,
-          valueField: "parentRefId",
-        });
+        const agents = await listAgentOptions({ context: this });
 
         return [{ name: "All Agents", value: "" }, ...agents];
       },
@@ -161,7 +168,7 @@ export class HarmonyAiTrigger implements INodeType {
       },
 
       async create(this: IHookFunctions): Promise<boolean> {
-        const eventType = this.getNodeParameter("event") as WebhookEventType;
+        const eventType = webhookEventType({ event: this.getNodeParameter("event") as string });
         const agentId = this.getNodeParameter("agentId", "") as string;
         const url = this.getNodeWebhookUrl("default");
 
@@ -175,10 +182,7 @@ export class HarmonyAiTrigger implements INodeType {
         const body: CreateWebhookEndpointBody = {
           eventType,
           url,
-          description: `n8n: ${this.getWorkflow().name ?? "workflow"}`.slice(
-            0,
-            DESCRIPTION_MAX_LENGTH,
-          ),
+          description: `n8n: ${this.getWorkflow().name ?? "flow"}`.slice(0, DESCRIPTION_MAX_LENGTH),
           enabled: true,
           filters: agentId ? { agentId } : {},
         };
@@ -247,6 +251,13 @@ export class HarmonyAiTrigger implements INodeType {
     const payload = this.getBodyData() as CallWebhook;
     if (payload.event === "test_event") {
       return { webhookResponse: "ignored test event" };
+    }
+
+    if (
+      this.getNodeParameter("event") === CONTACT_CALLS_FINISHED &&
+      payload.details.isLastCall !== true
+    ) {
+      return { webhookResponse: "ignored call with more calls scheduled" };
     }
 
     const json: IDataObject = {

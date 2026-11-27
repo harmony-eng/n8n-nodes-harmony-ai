@@ -8,28 +8,39 @@ import { HarmonyAi } from "./HarmonyAi.node.ts";
 const node = new HarmonyAi();
 
 describe("HarmonyAi", () => {
-  it("enrolls the contact in the chosen workflow with ordinary enrollment", async () => {
+  it("enrolls the contact in the chosen agent's published workflow with ordinary enrollment", async () => {
     // Arrange
+    const agentId = "0196e8c1-4b2a-7c3d-9e5f-6a7b8c9d0e1f";
+
     const driver = new N8nContextDriver({
       parameters: {
         resource: "contact",
-        operation: "addToWorkflow",
-        workflowId: "0196e8c1-4b2a-7c3d-9e5f-6a7b8c9d0e1f",
+        operation: "addToAgent",
+        agentId,
         sourceKind: "api",
         externalId: "lead-42",
         contactFields: { firstName: "Dana", phone: "+12125550199" },
         customFields: { field: [{ key: "company", value: "Acme" }] },
       },
-      respond: () => ({ accepted: 1, rejected: [] }),
+      respond: (request) =>
+        request.options.url === "/api/v1/workflows"
+          ? {
+              data: [
+                { id: "wf-draft", parentRefId: agentId, status: "draft" },
+                { id: "wf-live", parentRefId: agentId, status: "published" },
+                { id: "wf-other", parentRefId: "agent-2", status: "published" },
+              ],
+            }
+          : { accepted: 1, rejected: [] },
     });
 
     // Act
     const [output] = await node.execute.call(driver.execute());
 
     // Assert
-    assert.equal(driver.request({ index: 0 }).options.url, "/api/v1/contacts/bulk");
-    assert.deepEqual(driver.request({ index: 0 }).options.body, {
-      assignmentOptions: { workflowId: "0196e8c1-4b2a-7c3d-9e5f-6a7b8c9d0e1f" },
+    assert.equal(driver.request({ index: 1 }).options.url, "/api/v1/contacts/bulk");
+    assert.deepEqual(driver.request({ index: 1 }).options.body, {
+      assignmentOptions: { workflowId: "wf-live" },
       contacts: [
         {
           firstName: "Dana",
@@ -40,7 +51,32 @@ describe("HarmonyAi", () => {
         },
       ],
     });
-    assert.equal(output?.[0]?.json.accepted, true);
+    assert.deepEqual(output?.[0]?.json, {
+      accepted: true,
+      agentId,
+      sourceKind: "api",
+      externalId: "lead-42",
+    });
+  });
+
+  it("fails the item when no agent has the chosen ID", async () => {
+    // Arrange
+    const driver = new N8nContextDriver({
+      parameters: {
+        resource: "contact",
+        operation: "addToAgent",
+        agentId: "agent-missing",
+        sourceKind: "api",
+        contactFields: {},
+      },
+      respond: () => ({ data: [] }),
+    });
+
+    // Act
+    const run = node.execute.call(driver.execute());
+
+    // Assert
+    await assert.rejects(run, /Harmony has no agent with ID agent-missing/);
   });
 
   it("fails the item with Harmony's reason when the contact is rejected", async () => {
@@ -48,12 +84,15 @@ describe("HarmonyAi", () => {
     const driver = new N8nContextDriver({
       parameters: {
         resource: "contact",
-        operation: "addToWorkflow",
-        workflowId: "wf-1",
+        operation: "addToAgent",
+        agentId: "agent-1",
         sourceKind: "api",
         contactFields: {},
       },
-      respond: () => ({ accepted: 0, rejected: [{ reason: "invalid-phone", index: 0 }] }),
+      respond: (request) =>
+        request.options.url === "/api/v1/workflows"
+          ? { data: [{ id: "wf-1", parentRefId: "agent-1", status: "published" }] }
+          : { accepted: 0, rejected: [{ reason: "invalid-phone", index: 0 }] },
     });
 
     // Act
@@ -150,18 +189,42 @@ describe("HarmonyAi", () => {
     );
   });
 
-  it("gets a call's transcript by call ID", async () => {
+  it("gets a call without its transcript by default", async () => {
     // Arrange
     const driver = new N8nContextDriver({
-      parameters: { resource: "call", operation: "getTranscript", callId: "call-1" },
-      respond: () => ({ utterances: [] }),
+      parameters: { resource: "call", operation: "get", callId: "call-1" },
+      respond: () => ({ id: "call-1" }),
     });
 
     // Act
-    await node.execute.call(driver.execute());
+    const [output] = await node.execute.call(driver.execute());
 
     // Assert
-    assert.equal(driver.request({ index: 0 }).options.method, "GET");
-    assert.equal(driver.request({ index: 0 }).options.url, "/api/v1/calls/call-1/transcript");
+    assert.equal(driver.requests.length, 1);
+    assert.equal(driver.request({ index: 0 }).options.url, "/api/v1/calls/call-1");
+    assert.deepEqual(output?.[0]?.json, { id: "call-1" });
+  });
+
+  it("adds the call's utterances as transcript when Include Transcript is on", async () => {
+    // Arrange
+    const utterances = [
+      { speaker: "assistant", content: "Hi Dana", timestamp: "2026-01-01T10:00:00.000Z" },
+    ];
+
+    const driver = new N8nContextDriver({
+      parameters: { resource: "call", operation: "get", callId: "call-1", includeTranscript: true },
+      respond: (request) =>
+        request.options.url.endsWith("/transcript") ? { utterances } : { id: "call-1" },
+    });
+
+    // Act
+    const [output] = await node.execute.call(driver.execute());
+
+    // Assert
+    assert.deepEqual(driver.requests.map((request) => request.options.url).sort(), [
+      "/api/v1/calls/call-1",
+      "/api/v1/calls/call-1/transcript",
+    ]);
+    assert.deepEqual(output?.[0]?.json, { id: "call-1", transcript: utterances });
   });
 });

@@ -1,7 +1,7 @@
 {
   "name": "n8n-nodes-harmony-ai",
   "version": "0.1.0",
-  "description": "n8n nodes for Harmony AI voice agents: send contacts to Harmony workflows, look up contacts, calls and transcripts, and trigger flows when calls start, end, or have a recording.",
+  "description": "n8n nodes for Harmony AI voice agents: send contacts to Harmony voice agents, look up contacts, calls and transcripts, and trigger flows when calls start, end, or have a recording.",
   "keywords": [
     "harmony",
     "n8n-community-node-package",
